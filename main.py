@@ -60,17 +60,18 @@ class FactChecker:
         return list(set(self.ref_kg.objects(entity, RDFS.label)))
 
     def check_truth(self, fact):
-        sub = self.facts.value(fact, RDF.subject)
+        subj = self.facts.value(fact, RDF.subject)
         pre = self.facts.value(fact, RDF.predicate)
         obj = self.facts.value(fact, RDF.object)
 
-        if sub is None or pre is None or obj is None:
+        if subj is None or pre is None or obj is None:
             return 0.0
         # Existenzprüfung im Referenz-KG
-        is_true = (sub, pre, obj) in self.ref_kg
+        is_true = (subj, pre, obj) in self.ref_kg
         if is_true:
             return 1.0
 
+        print(f"Checking: {self.get_labels(subj)} {pre} {self.get_labels(obj)}")
         # More complex rules:
 
         return 0.0
