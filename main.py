@@ -1,15 +1,18 @@
 import os
-from rdflib import Graph, URIRef, Literal, Namespace, RDFS
+from rdflib import Graph, URIRef, Literal, Namespace, RDFS, Node
 from rdflib.namespace import RDF, XSD
 import sys
 REFERENCE_FILE = "reference-kg.nt"
 HIERARCHY_FILE = "classHierarchy.nt"
-INPUT_FILE = "fokg-sw-test-2024.nt"
+INPUT_FILE = "fokg-sw-train-2024.nt"
 OUTPUT_FILE = "result.ttl"
 
-# Namespace für das Ergebnis
+# Namespaces
 HAS_TRUTH = URIRef("http://swc2017.aksw.org/hasTruthValue")
 
+PLACE_OF_BIRTH = URIRef("http://rdf.freebase.com/ns/people.person.place_of_birth")
+PLACE_LIVED = URIRef("http://rdf.freebase.com/ns/people.person.places_lived..people.place_lived.location")
+PERSON = URIRef("http://rdf.freebase.com/ns/people.person")
 
 def load_graph(path):
     g = Graph()
@@ -50,14 +53,61 @@ class FactChecker:
 
         return supers
 
+    def get_all_super_locations(self, location):
+        locations = set()
+        stack = [location]
+
+        while stack:
+            current = stack.pop()
+            for parent in self.ref_kg.objects(current, URIRef("http://rdf.freebase.com/ns/location.location.part_of")):
+                if parent not in locations:
+                    locations.add(parent)
+                    stack.append(parent)
+            for parent in self.ref_kg.subjects(URIRef("http://rdf.freebase.com/ns/location.location.contains"), current):
+                if parent not in locations:
+                    locations.add(parent)
+                    stack.append(parent)
+        return locations
+
+    def is_location(self, entity):
+        return (self.has_type(entity, URIRef("http://rdf.freebase.com/ns/base.locations.countries"))
+                or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/locations.country"))
+                or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/location.location")))
+
     def query(self, subj, pre=None):
         return list(set(self.ref_kg.objects(subj, pre)))
 
     def get_types(self, entity):
         return list(set(self.ref_kg.objects(entity, RDF.type)))
 
+    def has_type(self, entity, target_cls):
+        for t in self.get_types(entity):
+            if t == target_cls:
+                return True
+            if target_cls in self.get_all_superclasses(t):
+                return True
+        return False
+
     def get_labels(self, entity):
         return list(set(self.ref_kg.objects(entity, RDFS.label)))
+
+    def nationality_heuristic(self, subj, pre, obj):
+        if not self.has_type(subj, PERSON):
+            return 0.0
+        if not self.is_location(obj):
+            return 0.0
+
+        score = 0.1
+
+        for loc in self.ref_kg.objects(subj, PLACE_OF_BIRTH):
+            if obj in self.get_all_super_locations(loc):
+                score += 0.4
+
+        for loc in self.ref_kg.objects(subj, PLACE_LIVED):
+            if obj in self.get_all_super_locations(loc):
+                score += 0.2
+
+        return min(score, 0.9)
 
     def check_truth(self, fact):
         subj = self.facts.value(fact, RDF.subject)
@@ -66,15 +116,25 @@ class FactChecker:
 
         if subj is None or pre is None or obj is None:
             return 0.0
+
+        print(f"Checking: {self.get_labels(subj)} {pre} {self.get_labels(obj)}")
+
         # Existenzprüfung im Referenz-KG
         is_true = (subj, pre, obj) in self.ref_kg
         if is_true:
             return 1.0
 
-        print(f"Checking: {self.get_labels(subj)} {pre} {self.get_labels(obj)}")
         # More complex rules:
+        score = 0.0
 
-        return 0.0
+        if str(pre).endswith("people.person.nationality"):
+            score = self.nationality_heuristic(subj, pre, obj)
+
+        real_score = self.get_real_score(fact)
+        print(f"Calculated score: {score}, \t Real score: {real_score}")
+        if score > 0:
+            print("halt")
+        return score
 
     def main(self):
         test_score = 0.0
