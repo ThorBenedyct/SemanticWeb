@@ -13,6 +13,11 @@ HAS_TRUTH = URIRef("http://swc2017.aksw.org/hasTruthValue")
 PLACE_OF_BIRTH = URIRef("http://rdf.freebase.com/ns/people.person.place_of_birth")
 PLACE_LIVED = URIRef("http://rdf.freebase.com/ns/people.person.places_lived..people.place_lived.location")
 PERSON = URIRef("http://rdf.freebase.com/ns/people.person")
+MUSIC_GROUP_MEMBER = URIRef("http://rdf.freebase.com/ns/music.group_member")
+MUSIC_ARTIST = URIRef("http://rdf.freebase.com/ns/music.artist")
+
+PROFESSION = URIRef("http://rdf.freebase.com/ns/people.person.profession")
+MUSICIAN = URIRef("http://rdf.freebase.com/ns/m.09jwl")
 
 def load_graph(path):
     g = Graph()
@@ -74,6 +79,10 @@ class FactChecker:
                 or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/locations.country"))
                 or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/location.location")))
 
+    def is_instrument(self, entity):
+        return (self.has_type(entity, URIRef("http://rdf.freebase.com/ns/music.performance_role"))
+                or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/music.instrument")))
+
     def query(self, subj, pre=None):
         return list(set(self.ref_kg.objects(subj, pre)))
 
@@ -91,6 +100,7 @@ class FactChecker:
     def get_labels(self, entity):
         return list(set(self.ref_kg.objects(entity, RDFS.label)))
 
+    # Rules based on different predicate cases
     def nationality_heuristic(self, subj, pre, obj):
         if not self.has_type(subj, PERSON):
             return 0.0
@@ -108,6 +118,37 @@ class FactChecker:
                 score += 0.2
 
         return min(score, 0.9)
+
+    def instrument_heuristic(self, subj, pre, obj):
+        if not self.is_instrument(subj):
+            return 0.0
+        if not self.has_type(obj, PERSON):
+            return 0.0
+
+        score = 0.1
+
+        if self.has_type(obj, MUSIC_GROUP_MEMBER):
+            score += 0.1
+        if self.has_type(obj, MUSIC_ARTIST):
+            score += 0.1
+
+        if MUSICIAN in self.ref_kg.objects(obj, PROFESSION):
+            score += 0.1
+
+        return min(score, 0.9)
+
+    def location_contains(self, subj, pre, obj):
+        if not self.is_location(subj):
+            return 0.0
+
+        if subj in self.get_all_super_locations(obj):
+            return 1.0
+
+        score = 0.05
+        if self.is_location(obj):
+            score += 0.05
+
+        return score
 
     def check_truth(self, fact):
         subj = self.facts.value(fact, RDF.subject)
@@ -130,10 +171,15 @@ class FactChecker:
         if str(pre).endswith("people.person.nationality"):
             score = self.nationality_heuristic(subj, pre, obj)
 
+        if str(pre).endswith("music.instrument.instrumentalists"):
+            score = self.instrument_heuristic(subj, pre, obj)
+
+        if str(pre).endswith("location.location.contains"):
+            score = self.location_contains(subj, pre, obj)
+
         real_score = self.get_real_score(fact)
         print(f"Calculated score: {score}, \t Real score: {real_score}")
-        if score > 0:
-            print("halt")
+
         return score
 
     def main(self):
@@ -161,13 +207,9 @@ class FactChecker:
         print("Fertig.")
 
 
-def main():
-    fact_checker = FactChecker()
-    fact_checker.main()
-
-
 if __name__ == "__main__":
     if len(sys.argv) >= 2:
         if os.path.exists(sys.argv[1]):
             INPUT_FILE = sys.argv[1]
-    main()
+    fact_checker = FactChecker()
+    fact_checker.main()
