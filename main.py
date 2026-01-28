@@ -2,6 +2,9 @@ import os
 from rdflib import Graph, URIRef, Literal, Namespace, RDFS, Node
 from rdflib.namespace import RDF, XSD
 import sys
+from collections import deque
+from sklearn.metrics import roc_auc_score
+
 REFERENCE_FILE = "reference-kg.nt"
 HIERARCHY_FILE = "classHierarchy.nt"
 INPUT_FILE = "fokg-sw-train-2024.nt"
@@ -11,6 +14,7 @@ OUTPUT_FILE = "result.ttl"
 HAS_TRUTH = URIRef("http://swc2017.aksw.org/hasTruthValue")
 
 PLACE_OF_BIRTH = URIRef("http://rdf.freebase.com/ns/people.person.place_of_birth")
+NATIONALITY = URIRef("http://rdf.freebase.com/ns/people.person.nationality")
 PLACE_LIVED = URIRef("http://rdf.freebase.com/ns/people.person.places_lived..people.place_lived.location")
 PERSON = URIRef("http://rdf.freebase.com/ns/people.person")
 MUSIC_GROUP_MEMBER = URIRef("http://rdf.freebase.com/ns/music.group_member")
@@ -19,21 +23,35 @@ MUSIC_ARTIST = URIRef("http://rdf.freebase.com/ns/music.artist")
 PROFESSION = URIRef("http://rdf.freebase.com/ns/people.person.profession")
 MUSICIAN = URIRef("http://rdf.freebase.com/ns/m.09jwl")
 
+GENDER_MALE = URIRef("http://rdf.freebase.com/ns/m.05zppz")
+GENDER_FEMALE = URIRef("http://rdf.freebase.com/ns/m.02zsn")
+
+ROMANTIC_RELATIONSHIP_CELEBRITY = URIRef("http://rdf.freebase.com/ns/celebrities.celebrity.sexual_relationships..celebrities.romantic_relationship.celebrity")
+DATED_CELEBRITY = URIRef("http://rdf.freebase.com/ns/base.popstra.celebrity.dated..base.popstra.dated.participant")
+
+TIMEZONE = URIRef("http://rdf.freebase.com/ns/time.time_zone")
+TIMEZONE_PREDICATE = URIRef("http://rdf.freebase.com/ns/location.location.time_zones")
+
 def load_graph(path):
+    print(f"Lade Graph von {path} ... ")
+
     g = Graph()
-    g.parse(path, format="nt")
+    if not os.path.exists(path):
+        print(f"Datei {path} fehlt!")
+        return g
+
+    if path.endswith(".ttl"):
+        g.parse(path, format="turtle")
+    else:
+        g.parse(path, format="nt")
+    print(f"Graph geladen mit {len(g)} Tripeln")
     return g
 
 
 class FactChecker:
     def __init__(self):
-        print("Lade Referenz-KG")
         self.ref_kg = load_graph(REFERENCE_FILE)
-
-        print("Lade Klassen-Hierachy")
         self.class_kg = load_graph(HIERARCHY_FILE)
-
-        print("Lade Input-Fakten")
         self.facts = load_graph(INPUT_FILE)
 
         self.resultGraph = Graph()
@@ -74,6 +92,22 @@ class FactChecker:
                     stack.append(parent)
         return locations
 
+    def get_all_sub_locations(self, location):
+        locations = set()
+        stack = [location]
+
+        while stack:
+            current = stack.pop()
+            for parent in self.ref_kg.subjects(URIRef("http://rdf.freebase.com/ns/location.location.part_of", current)):
+                if parent not in locations:
+                    locations.add(parent)
+                    stack.append(parent)
+            for parent in self.ref_kg.objects(current, URIRef("http://rdf.freebase.com/ns/location.location.contains")):
+                if parent not in locations:
+                    locations.add(parent)
+                    stack.append(parent)
+        return locations
+
     def is_location(self, entity):
         return (self.has_type(entity, URIRef("http://rdf.freebase.com/ns/base.locations.countries"))
                 or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/locations.country"))
@@ -82,6 +116,15 @@ class FactChecker:
     def is_instrument(self, entity):
         return (self.has_type(entity, URIRef("http://rdf.freebase.com/ns/music.performance_role"))
                 or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/music.instrument")))
+
+    def get_partners(self, person):
+        partners = []
+        partners += self.ref_kg.objects(person, ROMANTIC_RELATIONSHIP_CELEBRITY)
+        partners += self.ref_kg.subjects(ROMANTIC_RELATIONSHIP_CELEBRITY, person)
+        partners += self.ref_kg.objects(person, DATED_CELEBRITY)
+        partners += self.ref_kg.objects(DATED_CELEBRITY, person)
+        return set(partners)
+
 
     def query(self, subj, pre=None):
         return list(set(self.ref_kg.objects(subj, pre)))
@@ -99,6 +142,51 @@ class FactChecker:
 
     def get_labels(self, entity):
         return list(set(self.ref_kg.objects(entity, RDFS.label)))
+
+    def check_path_score(self, start, end, max_depth=2):
+        if start == end: return 1.0
+
+        q_fwd = deque([start]);
+        visited_fwd = {start: 0}
+        q_bwd = deque([end]);
+        visited_bwd = {end: 0}
+
+        while q_fwd and q_bwd:
+            if len(visited_fwd) >= 500 or len(visited_bwd) >= 500: break
+
+            if len(q_fwd) <= len(q_bwd):
+                curr = q_fwd.popleft()
+                current_dist = visited_fwd[curr]
+
+                if current_dist >= max_depth:
+                    continue
+
+                for n in self.ref_kg.objects(curr, None):
+                    if n in visited_bwd:
+                        dist = current_dist + 1 + visited_bwd[n]
+                        return 1.0 / (dist + 1)
+
+                    if n not in visited_fwd:
+                        visited_fwd[n] = visited_fwd[curr] + 1
+                        q_fwd.append(n)
+
+            else:
+                curr = q_bwd.popleft()
+                current_dist = visited_bwd[curr]
+
+                if current_dist >= max_depth:
+                    continue
+
+                for n in self.ref_kg.subjects(None, curr):
+                    if n in visited_fwd:
+                        dist = current_dist + 1 + visited_fwd[n]
+                        return 1.0 / (dist + 1)
+
+                    if n not in visited_bwd:
+                        visited_bwd[n] = visited_bwd[curr] + 1
+                        q_bwd.append(n)
+
+        return 0.0
 
     # Rules based on different predicate cases
     def nationality_heuristic(self, subj, pre, obj):
@@ -119,6 +207,54 @@ class FactChecker:
 
         return min(score, 0.9)
 
+    def place_of_birth_heuristic(self, subj, pre, obj):
+        if not self.has_type(subj, PERSON):
+            return 0.0
+        if not self.is_location(obj):
+            return 0.0
+
+        score = 0.1
+
+        for loc in self.ref_kg.objects(subj, NATIONALITY):
+            if obj in self.get_all_super_locations(loc):
+                score += 0.4
+            if obj in self.get_all_sub_locations(loc):
+                score += 0.1
+
+        for loc in self.ref_kg.objects(subj, PLACE_LIVED):
+            if obj in self.get_all_super_locations(loc):
+                score += 0.2
+            if obj in self.get_all_sub_locations(loc):
+                score += 0.1
+
+        return min(score, 0.9)
+
+    def time_zone_heuristic(self, subj, pre, obj):
+        if not self.is_location(subj):
+            return 0.0
+        if not self.has_type(obj, TIMEZONE):
+            return 0.0
+
+        score = 0.1
+
+        for loc in self.get_all_sub_locations(subj):
+            timezones = set(self.ref_kg.objects(loc, TIMEZONE_PREDICATE))
+            if obj in timezones:
+                score += 0.8
+            elif len(set(timezones)) > 0:
+                # It has a timezone, but is the wrong one
+                score -= 0.4
+
+        for loc in self.get_all_super_locations(subj):
+            timezones = set(self.ref_kg.objects(loc, TIMEZONE_PREDICATE))
+            if obj in timezones:
+                score += 0.1
+            elif len(set(timezones)) > 0:
+                # It has a timezone, but is the wrong one
+                score -= 0.05
+
+        return max(0.0, min(score, 1.0))
+
     def instrument_heuristic(self, subj, pre, obj):
         if not self.is_instrument(subj):
             return 0.0
@@ -137,7 +273,7 @@ class FactChecker:
 
         return min(score, 0.9)
 
-    def location_contains(self, subj, pre, obj):
+    def location_contains_heuristic(self, subj, pre, obj):
         if not self.is_location(subj):
             return 0.0
 
@@ -149,6 +285,35 @@ class FactChecker:
             score += 0.05
 
         return score
+
+    def gender_heuristic(self, subj, pre, obj):
+        if not self.has_type(subj, PERSON):
+            return 0.0
+        if obj != GENDER_MALE and obj != GENDER_FEMALE:
+            return 0.0
+
+        known_gender = self.query(subj, pre)
+        if len(known_gender) > 0:
+            if obj == known_gender:
+                return 1.0
+            else:
+                return 0.0
+        for partner in self.get_partners(subj):
+            partner_gender = self.query(partner, pre)
+            if len(partner_gender) > 0:
+                # Assume hetero
+                if obj != partner_gender[0]:
+                    return 0.95
+                else:
+                    return 0.05
+        for object in self.query(subj):
+            for label in self.get_labels(object):
+                if "female" in str(label).lower():
+                    if subj == GENDER_FEMALE:
+                        return 0.9
+                    else:
+                        return 0.1
+        return 0.5
 
     def check_truth(self, fact):
         subj = self.facts.value(fact, RDF.subject)
@@ -170,40 +335,64 @@ class FactChecker:
 
         if str(pre).endswith("people.person.nationality"):
             score = self.nationality_heuristic(subj, pre, obj)
-
-        if str(pre).endswith("music.instrument.instrumentalists"):
+        elif str(pre).endswith("people.person.place_of_birth"):
+            score = self.place_of_birth_heuristic(subj, pre, obj)
+        elif str(pre).endswith("music.instrument.instrumentalists"):
             score = self.instrument_heuristic(subj, pre, obj)
-
-        if str(pre).endswith("location.location.contains"):
-            score = self.location_contains(subj, pre, obj)
+        elif str(pre).endswith("location.location.contains"):
+            score = self.location_contains_heuristic(subj, pre, obj)
+        elif str(pre).endswith("people.person.gender"):
+            score = self.gender_heuristic(subj, pre, obj)
+        elif str(pre).endswith("location.location.time_zones"):
+            score = self.time_zone_heuristic(subj, pre, obj)
+        else:
+            score = self.check_path_score(subj, obj) * 0.4
 
         real_score = self.get_real_score(fact)
         print(f"Calculated score: {score}, \t Real score: {real_score}")
 
         return score
 
-    def main(self):
-        test_score = 0.0
+    def run(self):
+        y_true = []
+        y_scores = []
         amount_facts = 0
 
         for fact in self.facts.subjects(RDF.type, RDF.Statement):
             score = self.check_truth(fact)
-
             real_score = self.get_real_score(fact)
-            test_score = test_score + abs(score - real_score)
-            amount_facts += 1
+
+            if real_score is not None:
+                y_true.append(real_score)
+                y_scores.append(score)
 
             self.resultGraph.add((
                 fact,
                 HAS_TRUTH,
                 Literal(score, datatype=XSD.double)
             ))
-        test_score = test_score / amount_facts
+
+            amount_facts += 1
+            if amount_facts % 100 == 0:
+                print(f"{amount_facts}...")
+
+        if len(set(y_true)) > 1:
+            try:
+                auc = roc_auc_score(y_true, y_scores)
+                print(f"\n === AUC SCORE: {auc:.4f} ===")
+                if auc > 0.6:
+                    print("Yay, es klappt")
+                else:
+                    print("Schade, es klappt nicht")
+            except:
+                pass
+
+        else:
+            print("Keine validen labels")
 
         print("Schreibe Ergebnisdatei")
         self.resultGraph.serialize(destination=OUTPUT_FILE, format="nt")
 
-        print(f"Abweichung: {test_score}")
         print("Fertig.")
 
 
@@ -212,4 +401,4 @@ if __name__ == "__main__":
         if os.path.exists(sys.argv[1]):
             INPUT_FILE = sys.argv[1]
     fact_checker = FactChecker()
-    fact_checker.main()
+    fact_checker.run()
