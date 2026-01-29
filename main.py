@@ -15,6 +15,8 @@ HAS_TRUTH = URIRef("http://swc2017.aksw.org/hasTruthValue")
 
 PLACE_OF_BIRTH = URIRef("http://rdf.freebase.com/ns/people.person.place_of_birth")
 NATIONALITY = URIRef("http://rdf.freebase.com/ns/people.person.nationality")
+LOCATION_PART_OF = URIRef("http://rdf.freebase.com/ns/location.location.part_of")
+LOCATION_CONTAINS = URIRef("http://rdf.freebase.com/ns/location.location.contains")
 PLACE_LIVED = URIRef("http://rdf.freebase.com/ns/people.person.places_lived..people.place_lived.location")
 PERSON = URIRef("http://rdf.freebase.com/ns/people.person")
 MUSIC_GROUP_MEMBER = URIRef("http://rdf.freebase.com/ns/music.group_member")
@@ -82,11 +84,11 @@ class FactChecker:
 
         while stack:
             current = stack.pop()
-            for parent in self.ref_kg.objects(current, URIRef("http://rdf.freebase.com/ns/location.location.part_of")):
+            for parent in self.query_objects(current, LOCATION_PART_OF):
                 if parent not in locations:
                     locations.add(parent)
                     stack.append(parent)
-            for parent in self.ref_kg.subjects(URIRef("http://rdf.freebase.com/ns/location.location.contains"), current):
+            for parent in self.query_subjects(LOCATION_CONTAINS, current):
                 if parent not in locations:
                     locations.add(parent)
                     stack.append(parent)
@@ -98,11 +100,11 @@ class FactChecker:
 
         while stack:
             current = stack.pop()
-            for parent in self.ref_kg.subjects(URIRef("http://rdf.freebase.com/ns/location.location.part_of", current)):
+            for parent in self.query_subjects(LOCATION_PART_OF, current):
                 if parent not in locations:
                     locations.add(parent)
                     stack.append(parent)
-            for parent in self.ref_kg.objects(current, URIRef("http://rdf.freebase.com/ns/location.location.contains")):
+            for parent in self.query_objects(current, LOCATION_CONTAINS):
                 if parent not in locations:
                     locations.add(parent)
                     stack.append(parent)
@@ -119,18 +121,20 @@ class FactChecker:
 
     def get_partners(self, person):
         partners = []
-        partners += self.ref_kg.objects(person, ROMANTIC_RELATIONSHIP_CELEBRITY)
-        partners += self.ref_kg.subjects(ROMANTIC_RELATIONSHIP_CELEBRITY, person)
-        partners += self.ref_kg.objects(person, DATED_CELEBRITY)
-        partners += self.ref_kg.objects(DATED_CELEBRITY, person)
+        partners += self.query_objects(person, ROMANTIC_RELATIONSHIP_CELEBRITY)
+        partners += self.query_subjects(ROMANTIC_RELATIONSHIP_CELEBRITY, person)
+        partners += self.query_objects(person, DATED_CELEBRITY)
+        partners += self.query_objects(DATED_CELEBRITY, person)
         return set(partners)
 
-
-    def query(self, subj, pre=None):
+    def query_objects(self, subj, pre=None):
         return list(set(self.ref_kg.objects(subj, pre)))
 
+    def query_subjects(self, pre, obj):
+        return list(set(self.ref_kg.subjects(pre, obj)))
+
     def get_types(self, entity):
-        return list(set(self.ref_kg.objects(entity, RDF.type)))
+        return self.query_objects(entity, RDF.type)
 
     def has_type(self, entity, target_cls):
         for t in self.get_types(entity):
@@ -141,7 +145,7 @@ class FactChecker:
         return False
 
     def get_labels(self, entity):
-        return list(set(self.ref_kg.objects(entity, RDFS.label)))
+        return self.query_objects(entity, RDFS.label)
 
     def check_path_score(self, start, end, max_depth=2):
         if start == end: return 1.0
@@ -161,7 +165,7 @@ class FactChecker:
                 if current_dist >= max_depth:
                     continue
 
-                for n in self.ref_kg.objects(curr, None):
+                for n in self.query_objects(curr, None):
                     if n in visited_bwd:
                         dist = current_dist + 1 + visited_bwd[n]
                         return 1.0 / (dist + 1)
@@ -177,7 +181,7 @@ class FactChecker:
                 if current_dist >= max_depth:
                     continue
 
-                for n in self.ref_kg.subjects(None, curr):
+                for n in self.query_subjects(None, curr):
                     if n in visited_fwd:
                         dist = current_dist + 1 + visited_fwd[n]
                         return 1.0 / (dist + 1)
@@ -197,16 +201,15 @@ class FactChecker:
 
         score = 0.1
 
-        for loc in self.ref_kg.objects(subj, PLACE_OF_BIRTH):
+        for loc in self.query_objects(subj, PLACE_OF_BIRTH):
             if obj in self.get_all_super_locations(loc):
                 score += 0.4
 
-        for loc in self.ref_kg.objects(subj, PLACE_LIVED):
+        for loc in self.query_objects(subj, PLACE_LIVED):
             if obj in self.get_all_super_locations(loc):
                 score += 0.2
 
         return min(score, 0.9)
-
     def place_of_birth_heuristic(self, subj, pre, obj):
         if not self.has_type(subj, PERSON):
             return 0.0
@@ -215,20 +218,19 @@ class FactChecker:
 
         score = 0.1
 
-        for loc in self.ref_kg.objects(subj, NATIONALITY):
+        for loc in self.query_objects(subj, NATIONALITY):
             if obj in self.get_all_super_locations(loc):
                 score += 0.4
             if obj in self.get_all_sub_locations(loc):
                 score += 0.1
 
-        for loc in self.ref_kg.objects(subj, PLACE_LIVED):
+        for loc in self.query_objects(subj, PLACE_LIVED):
             if obj in self.get_all_super_locations(loc):
                 score += 0.2
             if obj in self.get_all_sub_locations(loc):
                 score += 0.1
 
         return min(score, 0.9)
-
     def time_zone_heuristic(self, subj, pre, obj):
         if not self.is_location(subj):
             return 0.0
@@ -238,23 +240,22 @@ class FactChecker:
         score = 0.1
 
         for loc in self.get_all_sub_locations(subj):
-            timezones = set(self.ref_kg.objects(loc, TIMEZONE_PREDICATE))
+            timezones = self.query_objects(loc, TIMEZONE_PREDICATE)
             if obj in timezones:
                 score += 0.8
-            elif len(set(timezones)) > 0:
+            elif len(timezones) > 0:
                 # It has a timezone, but is the wrong one
                 score -= 0.4
 
         for loc in self.get_all_super_locations(subj):
-            timezones = set(self.ref_kg.objects(loc, TIMEZONE_PREDICATE))
+            timezones = self.query_objects(loc, TIMEZONE_PREDICATE)
             if obj in timezones:
                 score += 0.1
-            elif len(set(timezones)) > 0:
+            elif len(timezones) > 0:
                 # It has a timezone, but is the wrong one
                 score -= 0.05
 
         return max(0.0, min(score, 1.0))
-
     def instrument_heuristic(self, subj, pre, obj):
         if not self.is_instrument(subj):
             return 0.0
@@ -268,11 +269,10 @@ class FactChecker:
         if self.has_type(obj, MUSIC_ARTIST):
             score += 0.1
 
-        if MUSICIAN in self.ref_kg.objects(obj, PROFESSION):
+        if MUSICIAN in self.query_objects(obj, PROFESSION):
             score += 0.1
 
         return min(score, 0.9)
-
     def location_contains_heuristic(self, subj, pre, obj):
         if not self.is_location(subj):
             return 0.0
@@ -285,28 +285,27 @@ class FactChecker:
             score += 0.05
 
         return score
-
     def gender_heuristic(self, subj, pre, obj):
         if not self.has_type(subj, PERSON):
             return 0.0
         if obj != GENDER_MALE and obj != GENDER_FEMALE:
             return 0.0
 
-        known_gender = self.query(subj, pre)
+        known_gender = self.query_objects(subj, pre)
         if len(known_gender) > 0:
-            if obj == known_gender:
+            if obj == known_gender[0]:
                 return 1.0
             else:
                 return 0.0
         for partner in self.get_partners(subj):
-            partner_gender = self.query(partner, pre)
+            partner_gender = self.query_objects(partner, pre)
             if len(partner_gender) > 0:
                 # Assume hetero
                 if obj != partner_gender[0]:
                     return 0.95
                 else:
                     return 0.05
-        for object in self.query(subj):
+        for object in self.query_objects(subj):
             for label in self.get_labels(object):
                 if "female" in str(label).lower():
                     if subj == GENDER_FEMALE:
