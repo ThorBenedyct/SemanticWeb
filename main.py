@@ -19,8 +19,18 @@ LOCATION_PART_OF = URIRef("http://rdf.freebase.com/ns/location.location.part_of"
 LOCATION_CONTAINS = URIRef("http://rdf.freebase.com/ns/location.location.contains")
 PLACE_LIVED = URIRef("http://rdf.freebase.com/ns/people.person.places_lived..people.place_lived.location")
 PERSON = URIRef("http://rdf.freebase.com/ns/people.person")
-MUSIC_GROUP_MEMBER = URIRef("http://rdf.freebase.com/ns/music.group_member")
-MUSIC_ARTIST = URIRef("http://rdf.freebase.com/ns/music.artist")
+MUSIC_GROUP_MEMBER = URIRef("http://rdf.freebase.com/ns/music_group_member")
+MUSIC_ARTIST = URIRef("http://rdf.freebase.com/ns/music_artist")
+MUSIC_ARTIST2 = URIRef("http://rdf.freebase.com/ns/music.artist")
+
+MUSIC_GENRE_ARTIST = URIRef("http://rdf.freebase.com/ns/music.artist.genre")
+MUSIC_GENRE_TYPE = URIRef('http://rdf.freebase.com/ns/music.genre')
+FILM_GENRE = URIRef("http://rdf.freebase.com/ns/film.film.genre")
+FILE_GENRE_TYPE = URIRef('http://rdf.freebase.com/ns/film.film_genre')
+FILM = URIRef("http://rdf.freebase.com/ns/film.film")
+
+SEQUEL = URIRef("http://rdf.freebase.com/ns/film.film.sequel")
+PREQUEL = URIRef("http://rdf.freebase.com/ns/film.film.prequel")
 
 PROFESSION = URIRef("http://rdf.freebase.com/ns/people.person.profession")
 MUSICIAN = URIRef("http://rdf.freebase.com/ns/m.09jwl")
@@ -28,11 +38,13 @@ MUSICIAN = URIRef("http://rdf.freebase.com/ns/m.09jwl")
 GENDER_MALE = URIRef("http://rdf.freebase.com/ns/m.05zppz")
 GENDER_FEMALE = URIRef("http://rdf.freebase.com/ns/m.02zsn")
 
-ROMANTIC_RELATIONSHIP_CELEBRITY = URIRef("http://rdf.freebase.com/ns/celebrities.celebrity.sexual_relationships..celebrities.romantic_relationship.celebrity")
+ROMANTIC_RELATIONSHIP_CELEBRITY = URIRef(
+    "http://rdf.freebase.com/ns/celebrities.celebrity.sexual_relationships..celebrities.romantic_relationship.celebrity")
 DATED_CELEBRITY = URIRef("http://rdf.freebase.com/ns/base.popstra.celebrity.dated..base.popstra.dated.participant")
 
 TIMEZONE = URIRef("http://rdf.freebase.com/ns/time.time_zone")
 TIMEZONE_PREDICATE = URIRef("http://rdf.freebase.com/ns/location.location.time_zones")
+
 
 def load_graph(path):
     print(f"Lade Graph von {path} ... ")
@@ -118,6 +130,12 @@ class FactChecker:
     def is_instrument(self, entity):
         return (self.has_type(entity, URIRef("http://rdf.freebase.com/ns/music.performance_role"))
                 or self.has_type(entity, URIRef("http://rdf.freebase.com/ns/music.instrument")))
+
+    def is_musician(self, entity):
+        return (self.has_type(entity, MUSIC_GROUP_MEMBER)
+                or self.has_type(entity, MUSIC_ARTIST)
+                or self.has_type(entity, MUSIC_ARTIST2)
+                or MUSICIAN in self.query_objects(entity, PROFESSION))
 
     def get_partners(self, person):
         partners = []
@@ -210,6 +228,7 @@ class FactChecker:
                 score += 0.2
 
         return min(score, 0.9)
+
     def place_of_birth_heuristic(self, subj, pre, obj):
         if not self.has_type(subj, PERSON):
             return 0.0
@@ -231,6 +250,7 @@ class FactChecker:
                 score += 0.1
 
         return min(score, 0.9)
+
     def time_zone_heuristic(self, subj, pre, obj):
         if not self.is_location(subj):
             return 0.0
@@ -256,6 +276,7 @@ class FactChecker:
                 score -= 0.05
 
         return max(0.0, min(score, 1.0))
+
     def instrument_heuristic(self, subj, pre, obj):
         if not self.is_instrument(subj):
             return 0.0
@@ -264,15 +285,11 @@ class FactChecker:
 
         score = 0.1
 
-        if self.has_type(obj, MUSIC_GROUP_MEMBER):
-            score += 0.1
-        if self.has_type(obj, MUSIC_ARTIST):
-            score += 0.1
-
-        if MUSICIAN in self.query_objects(obj, PROFESSION):
-            score += 0.1
+        if self.is_musician(obj):
+            score += 0.2
 
         return min(score, 0.9)
+
     def location_contains_heuristic(self, subj, pre, obj):
         if not self.is_location(subj):
             return 0.0
@@ -285,6 +302,7 @@ class FactChecker:
             score += 0.05
 
         return score
+
     def gender_heuristic(self, subj, pre, obj):
         if not self.has_type(subj, PERSON):
             return 0.0
@@ -314,6 +332,46 @@ class FactChecker:
                         return 0.1
         return 0.5
 
+    def music_genre_heuristic(self, subj, obj):
+        if not self.has_type(subj, MUSIC_GENRE_TYPE):
+            return 0.0
+
+        score = 0.05
+
+        if self.is_musician(obj):
+            score += 0.2
+
+        if (subj, MUSIC_GENRE_ARTIST, obj) in self.ref_kg:
+            return 1.0
+
+        for neighbor in self.ref_kg.objects(subj, None):
+            if (neighbor, MUSIC_GENRE_ARTIST, obj) in self.ref_kg:
+                return 0.8
+
+        for member in self.ref_kg.objects(None, subj):
+            if (member, MUSIC_GENRE_ARTIST, obj) in self.ref_kg:
+                return 0.6
+
+        return score
+
+    def film_genre_heuristic(self, subj, obj):
+        if not self.has_type(subj, FILM):
+            return 0.0
+        if not self.has_type(obj, FILE_GENRE_TYPE):
+            return 0.0
+
+        related_films = []
+        for seq in self.ref_kg.objects(subj, SEQUEL):
+            related_films.append(seq)
+        for pre in self.ref_kg.objects(subj, PREQUEL):
+            related_films.append(pre)
+
+        for film in related_films:
+            if (film, FILM_GENRE, obj) in self.ref_kg:
+                return 0.9
+
+        return 0.1
+
     def check_truth(self, fact):
         subj = self.facts.value(fact, RDF.subject)
         pre = self.facts.value(fact, RDF.predicate)
@@ -332,6 +390,8 @@ class FactChecker:
         # More complex rules:
         score = 0.0
 
+        rule_applied = False
+
         if str(pre).endswith("people.person.nationality"):
             score = self.nationality_heuristic(subj, pre, obj)
         elif str(pre).endswith("people.person.place_of_birth"):
@@ -344,11 +404,19 @@ class FactChecker:
             score = self.gender_heuristic(subj, pre, obj)
         elif str(pre).endswith("location.location.time_zones"):
             score = self.time_zone_heuristic(subj, pre, obj)
+        # elif str(pre).endswith("music.genre.artists"):
+        #     score = self.music_genre_heuristic(subj, obj)
+        #     rule_applied = True
+        elif "film" in str(pre) and "genre" in str(pre):
+            score = self.film_genre_heuristic(subj, obj)
+            rule_applied = True
         else:
             score = self.check_path_score(subj, obj) * 0.4
 
         real_score = self.get_real_score(fact)
-        print(f"Calculated score: {score}, \t Real score: {real_score}")
+        if rule_applied:
+            print(f"Calculated score: {score}, \t Real score: {real_score}")
+            print("")
 
         return score
 
