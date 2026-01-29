@@ -3,7 +3,7 @@ from rdflib import Graph, URIRef, Literal, Namespace, RDFS, Node
 from rdflib.namespace import RDF, XSD
 import sys
 from collections import deque
-from sklearn.metrics import roc_auc_score
+#from sklearn.metrics import roc_auc_score
 
 REFERENCE_FILE = "reference-kg.nt"
 HIERARCHY_FILE = "classHierarchy.nt"
@@ -390,8 +390,6 @@ class FactChecker:
         # More complex rules:
         score = 0.0
 
-        rule_applied = False
-
         if str(pre).endswith("people.person.nationality"):
             score = self.nationality_heuristic(subj, pre, obj)
         elif str(pre).endswith("people.person.place_of_birth"):
@@ -406,17 +404,14 @@ class FactChecker:
             score = self.time_zone_heuristic(subj, pre, obj)
         # elif str(pre).endswith("music.genre.artists"):
         #     score = self.music_genre_heuristic(subj, obj)
-        #     rule_applied = True
         elif "film" in str(pre) and "genre" in str(pre):
             score = self.film_genre_heuristic(subj, obj)
-            rule_applied = True
         else:
             score = self.check_path_score(subj, obj) * 0.4
 
-        real_score = self.get_real_score(fact)
-        if rule_applied:
-            print(f"Calculated score: {score}, \t Real score: {real_score}")
-            print("")
+        # real_score = self.get_real_score(fact)
+        #
+        # print(f"Calculated score: {score}, \t Real score: {real_score}")
 
         return score
 
@@ -447,10 +442,6 @@ class FactChecker:
             try:
                 auc = roc_auc_score(y_true, y_scores)
                 print(f"\n === AUC SCORE: {auc:.4f} ===")
-                if auc > 0.6:
-                    print("Yay, es klappt")
-                else:
-                    print("Schade, es klappt nicht")
             except:
                 pass
 
