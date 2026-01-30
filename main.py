@@ -7,7 +7,7 @@ from collections import deque
 
 REFERENCE_FILE = "reference-kg.nt"
 HIERARCHY_FILE = "classHierarchy.nt"
-INPUT_FILE = "fokg-sw-train-2024.nt"
+INPUT_FILE = "fokg-sw-test-2024.nt"
 OUTPUT_FILE = "result.ttl"
 
 # Namespaces
@@ -438,15 +438,15 @@ class FactChecker:
             if amount_facts % 100 == 0:
                 print(f"{amount_facts}...")
 
-        if len(set(y_true)) > 1:
-            try:
-                auc = roc_auc_score(y_true, y_scores)
-                print(f"\n === AUC SCORE: {auc:.4f} ===")
-            except:
-                pass
-
-        else:
-            print("Keine validen labels")
+        # if len(set(y_true)) > 1:
+        #     try:
+        #         auc = roc_auc_score(y_true, y_scores)
+        #         print(f"\n === AUC SCORE: {auc:.4f} ===")
+        #     except:
+        #         pass
+        #
+        # else:
+        #     print("Keine validen labels")
 
         print("Schreibe Ergebnisdatei")
         self.resultGraph.serialize(destination=OUTPUT_FILE, format="nt")
