@@ -1,5 +1,5 @@
 import os
-from rdflib import Graph, URIRef, Literal, Namespace, RDFS, Node
+from rdflib import Graph, URIRef, Literal, RDFS
 from rdflib.namespace import RDF, XSD
 import sys
 from collections import deque

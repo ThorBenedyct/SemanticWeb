@@ -29,15 +29,18 @@ These are:
 - **Nationality** and **place of birth**. This heuristic follows a transitivity approach, through which e.g. a person born in Berlin will also be born in Germany.
 Hierarchies like ‘part_of’ and ‘contains’ can be accessed for this.
 
-- **Gender**. Checks if there exists a known gender to a person. If not other labels, such as ‘female actor’ can be used to confirm this.
+- **Gender**. Checks if there exists a known gender to a person. 
+Otherwise, it checks for possible romantic partners of the person and determines gender based on the assumption, that the person is likely heterosexual. 
+Lastly it checks if connected nodes have labels, such as ‘female actor’ to determine gender.
 
 - **Location Containment** Validates the connection between time zones and geography through a location-tree.
 
 - **Time Zones**. Validates the connection between time zones and geography through a location-tree.
 
-- **Instruments**. Checks if the subject is an instrument and if the object is a musician, who either plays the instrument or a subclass of it.
+- **Instruments**. Checks if subject and objects have appropriate types (instrument and person). 
+If the object is a musician, it is considered likely, that the statement is true.
 
-- **Film Genre**. Analyzes sequels and prequels of a movie to deduct its possible genre.
+- **Film Genre**. Analyzes sequels and prequels of a movie to deduce its possible genre.
 
 ## 3. Fallback: BFS
 If neither the exact match, nor the heuristics find a sufficient answer, a bi-directional BFS will take place. 
@@ -62,11 +65,11 @@ cd fact-checking-tool
 ```
 
 2. Install dependencies using bash
-```
-pip install rdflib scikit-learn (WINDOWS)
 
-python3 -m pip install rdflib scikit-learn (MACOS)
-```
+`pip install rdflib` (WINDOWS)
+
+`python3 -m pip install rdflib` (MACOS)
+
 3. Download the correct data sources
 
 In the project folder you need to have the following files:
@@ -82,7 +85,7 @@ The reference-kg.nt file is too big for GitHub and needs to be downloaded manual
 
 In the course go to the “mini-project” tab and download the reference knowledge graph as a dump file.
 
-If you have downloaded the file from Panda it is recommended to move it manually from your downloads folder into the fact-checking-tool folder.
+If you have downloaded the file from Panda, just move it manually into the fact-checking-tool folder.
 
 
 4. Start the tool from the fact-checking-tool directory through your terminal:
