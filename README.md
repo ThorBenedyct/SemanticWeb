@@ -95,6 +95,12 @@ If you have downloaded the file from Panda, just move it manually into the fact-
 
 `python3 main.py` (MACOS)
 
+Specific input files can be chosen with 
+
+`python main.py filename.nt` (WINDOWS)
+
+`python3 main.py filename.nt` (MACOS)
+
 5. The result will be the newly created `result.ttl` file in the fact-checking-tool directory located on your desktop
 
 Thanks for using our fact-checking tool :-)
